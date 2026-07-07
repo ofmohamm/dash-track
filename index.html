@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live Location</title>
+  <style>
+    :root {
+      --text: rgba(255, 255, 255, 0.94);
+      --muted: rgba(255, 255, 255, 0.68);
+      --faint: rgba(255, 255, 255, 0.18);
+      --shadow: rgba(0, 0, 0, 0.5);
+      --accent: #8aa0ff;
+      --bg-image: url("https://images.unsplash.com/photo-1419242902214-272b3f66ee7a?auto=format&fit=crop&w=2400&q=85");
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      overflow: hidden;
+      background:
+        linear-gradient(180deg, rgba(0, 0, 0, 0.2), rgba(0, 0, 0, 0.5)),
+        var(--bg-image) center / cover no-repeat,
+        #000;
+    }
+
+    .stage {
+      position: relative;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: clamp(1.5rem, 5vw, 5rem);
+    }
+
+    .location {
+      text-align: center;
+      max-width: min(92vw, 60rem);
+      transform: translateY(-1rem);
+      text-shadow: 0 1rem 3rem var(--shadow);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.6rem;
+      color: var(--muted);
+      font-size: clamp(0.85rem, 1.6vw, 1.15rem);
+      font-weight: 650;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+    }
+
+    .pin {
+      width: 1.1em;
+      height: 1.1em;
+      opacity: 0.85;
+      transform: translateY(-0.04em);
+    }
+
+    .area {
+      margin-top: clamp(0.9rem, 2vw, 1.6rem);
+      font-size: clamp(3rem, 9vw, 8rem);
+      line-height: 1.02;
+      font-weight: 760;
+      letter-spacing: -0.045em;
+      /* Fade the text in on each change; see swapArea(). */
+      transition: opacity 320ms ease;
+    }
+
+    .area.fading { opacity: 0; }
+
+    .area.waiting {
+      color: var(--muted);
+      font-weight: 640;
+      letter-spacing: -0.03em;
+    }
+
+    .updated {
+      margin-top: clamp(1.4rem, 3vw, 2.6rem);
+      color: var(--muted);
+      font-size: clamp(0.85rem, 1.5vw, 1.1rem);
+      letter-spacing: 0.02em;
+      opacity: 0.85;
+      min-height: 1em;
+    }
+
+    .updated.stale { color: #ffcf9c; }
+
+    .controls {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      display: flex;
+      gap: 0.5rem;
+      opacity: 0.55;
+      transition: opacity 180ms ease;
+    }
+
+    .controls:hover { opacity: 1; }
+
+    .icon-btn {
+      display: grid;
+      place-items: center;
+      width: 2.35rem;
+      height: 2.35rem;
+      color: var(--text);
+      background: rgba(12, 12, 14, 0.4);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 999px;
+      backdrop-filter: blur(14px);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .icon-btn:hover { background: rgba(255, 255, 255, 0.18); }
+
+    .icon-btn svg { width: 1.05rem; height: 1.05rem; }
+
+    .hide-ui .controls {
+      opacity: 0;
+      pointer-events: none;
+    }
+  </style>
+</head>
+<body>
+  <main class="stage">
+    <section class="location" aria-live="polite">
+      <div class="eyebrow">
+        <svg class="pin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 21s-6-5.2-6-10a6 6 0 1 1 12 0c0 4.8-6 10-6 10Z" stroke="currentColor" stroke-width="1.7"/>
+          <circle cx="12" cy="11" r="2.1" stroke="currentColor" stroke-width="1.7"/>
+        </svg>
+        Current Area
+      </div>
+      <div class="area waiting" id="area">Waiting for location…</div>
+      <div class="updated" id="updated"></div>
+    </section>
+  </main>
+
+  <div class="controls">
+    <button class="icon-btn" id="fullscreenBtn" type="button" title="Toggle fullscreen" aria-label="Toggle fullscreen">
+      <svg id="expandIcon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <svg id="collapseIcon" viewBox="0 0 24 24" fill="none" aria-hidden="true" style="display:none">
+        <path d="M4 9h5V4M20 9h-5V4M4 15h5v5M20 15h-5v5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </button>
+  </div>
+
+  <script>
+    const els = {
+      area: document.getElementById("area"),
+      updated: document.getElementById("updated"),
+      fullscreenBtn: document.getElementById("fullscreenBtn"),
+      expandIcon: document.getElementById("expandIcon"),
+      collapseIcon: document.getElementById("collapseIcon")
+    };
+
+    // Last values we rendered, so we only touch the DOM (and trigger the
+    // cross-fade) when something actually changed.
+    const shown = { area: null, timestamp: null };
+
+    function swapArea(text, waiting) {
+      if (text === shown.area) {
+        els.area.classList.toggle("waiting", waiting);
+        return;
+      }
+      shown.area = text;
+      els.area.classList.add("fading");
+      setTimeout(() => {
+        els.area.textContent = text;
+        els.area.classList.toggle("waiting", waiting);
+        els.area.classList.remove("fading");
+      }, 200);
+    }
+
+    function relativeTime(seconds) {
+      if (seconds < 2) return "Updated just now";
+      if (seconds < 60) return `Updated ${Math.round(seconds)} seconds ago`;
+      const mins = Math.round(seconds / 60);
+      if (mins < 60) return `Updated ${mins} minute${mins === 1 ? "" : "s"} ago`;
+      const hrs = Math.round(mins / 60);
+      return `Updated ${hrs} hour${hrs === 1 ? "" : "s"} ago`;
+    }
+
+    // Cache the latest fix so the "updated N seconds ago" line keeps ticking
+    // between polls. We track whether a fix has arrived (received) separately
+    // from whether it resolved to an area, so we never fall back to showing
+    // raw coordinates — the display only ever names an area.
+    const latest = { area: null, received: false, timestamp: null };
+
+    function renderUpdated() {
+      if (latest.timestamp == null) {
+        els.updated.textContent = "";
+        els.updated.classList.remove("stale");
+        return;
+      }
+      const seconds = Math.max(0, Date.now() / 1000 - latest.timestamp);
+      els.updated.textContent = relativeTime(seconds);
+      // A fix older than a couple of minutes means the Shortcut hasn't run
+      // recently — warm the note so it's obvious the position may be stale.
+      els.updated.classList.toggle("stale", seconds > 120);
+    }
+
+    function render() {
+      if (latest.area) {
+        swapArea(latest.area, false);
+      } else if (latest.received) {
+        // A fix arrived but hasn't resolved to an area yet (geocoding pending
+        // or briefly unavailable). Never reveal coordinates as a stand-in.
+        swapArea("Finding area…", true);
+      } else {
+        swapArea("Waiting for location…", true);
+      }
+      renderUpdated();
+    }
+
+    async function poll() {
+      try {
+        const res = await fetch("/latest", { cache: "no-store" });
+        if (!res.ok) throw new Error();
+        const data = await res.json();
+        latest.area = data.area || null;
+        latest.received = typeof data.timestamp === "number";
+        latest.timestamp = typeof data.timestamp === "number" ? data.timestamp : null;
+        render();
+      } catch {
+        // Keep showing the last known area; renderUpdated() will let the
+        // timestamp age so it's clear the feed went quiet.
+        renderUpdated();
+      }
+    }
+
+    function toggleFullscreen() {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen?.();
+        document.body.classList.add("hide-ui");
+      } else {
+        document.exitFullscreen?.();
+        document.body.classList.remove("hide-ui");
+      }
+    }
+
+    function syncFullscreenIcon() {
+      const fs = Boolean(document.fullscreenElement);
+      els.expandIcon.style.display = fs ? "none" : "";
+      els.collapseIcon.style.display = fs ? "" : "none";
+    }
+
+    els.fullscreenBtn.addEventListener("click", toggleFullscreen);
+    document.addEventListener("fullscreenchange", syncFullscreenIcon);
+
+    let hideTimer;
+    window.addEventListener("mousemove", () => {
+      document.body.classList.remove("hide-ui");
+      clearTimeout(hideTimer);
+      hideTimer = setTimeout(() => document.body.classList.add("hide-ui"), 3000);
+    });
+
+    render();
+    poll();
+    // Spec: poll /latest every second. render() also runs each tick so the
+    // "updated N seconds ago" line stays live even when the fix doesn't change.
+    setInterval(poll, 1000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) poll();
+    });
+  </script>
+</body>
+</html>
